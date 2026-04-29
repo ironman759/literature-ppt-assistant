@@ -1,0 +1,4 @@
+interface:
+  display_name: "Literature PPT Assistant"
+  short_description: "Turn a paper PDF into a validated literature summary and presentation bundle"
+  default_prompt: "Use $literature-ppt-assistant to analyze this paper PDF, prepare extraction and section artifacts with the managed runtime, draft a faithful summary plus slide_spec.json, then build and validate the desktop literature bundle with summary DOCX, PPTX, speaker notes, source manifest, and QA renders. If I provide a reference PPT, profile it and match its pacing and style when appropriate."
