@@ -37,6 +37,80 @@ DEFAULT_THEME = {
 }
 
 
+class SpecValidationError(ValueError):
+    pass
+
+
+def _nonempty_list(value) -> bool:
+    return isinstance(value, list) and any(str(item).strip() for item in value)
+
+
+def normalize_slide_spec(slide_spec: dict) -> dict:
+    layout = slide_spec.get("layout", "standard")
+    if layout == "comparison":
+        for column_name in ("left_column", "right_column"):
+            column = slide_spec.get(column_name)
+            if isinstance(column, dict) and "items" in column and "bullets" not in column:
+                column["bullets"] = column.pop("items")
+    return slide_spec
+
+
+def validate_slide_spec(spec: dict) -> None:
+    errors: list[str] = []
+    if not str(spec.get("deck_title", "")).strip():
+        errors.append("deck_title is required")
+    slides = spec.get("slides")
+    if not isinstance(slides, list) or not slides:
+        errors.append("slides must be a non-empty list")
+        raise SpecValidationError("; ".join(errors))
+
+    for index, slide in enumerate(slides, start=2):
+        normalize_slide_spec(slide)
+        prefix = f"slide {index}"
+        layout = slide.get("layout", "standard")
+        for field in ("section", "title", "slide_purpose", "notes"):
+            if not str(slide.get(field, "")).strip():
+                errors.append(f"{prefix}: missing {field}")
+
+        if layout == "comparison":
+            for column_name in ("left_column", "right_column"):
+                column = slide.get(column_name)
+                if not isinstance(column, dict):
+                    errors.append(f"{prefix}: {column_name} must be an object")
+                    continue
+                if not str(column.get("title", "")).strip():
+                    errors.append(f"{prefix}: {column_name}.title is required")
+                if not _nonempty_list(column.get("bullets")):
+                    errors.append(f"{prefix}: {column_name}.bullets must contain at least one item")
+        elif layout == "workflow":
+            if not (_nonempty_list(slide.get("workflow_steps")) or _nonempty_list(slide.get("bullets"))):
+                errors.append(f"{prefix}: workflow_steps or bullets must contain at least one item")
+        elif layout == "result_summary":
+            if not (_nonempty_list(slide.get("result_highlights")) or _nonempty_list(slide.get("bullets"))):
+                errors.append(f"{prefix}: result_highlights or bullets must contain at least one item")
+        elif layout == "figure_focus":
+            image_path = slide.get("image_path")
+            if not image_path:
+                errors.append(f"{prefix}: image_path is required for figure_focus")
+            elif not Path(str(image_path)).exists():
+                errors.append(f"{prefix}: image_path does not exist: {image_path}")
+        elif layout == "limitation_implication":
+            if not _nonempty_list(slide.get("limitations")):
+                errors.append(f"{prefix}: limitations must contain at least one item")
+            if not _nonempty_list(slide.get("implications")):
+                errors.append(f"{prefix}: implications must contain at least one item")
+        elif layout == "sampling_design":
+            for field in ("left_image_path", "right_image_path"):
+                image_path = slide.get(field)
+                if image_path and not Path(str(image_path)).exists():
+                    errors.append(f"{prefix}: {field} does not exist: {image_path}")
+        elif layout not in LAYOUT_RENDERERS:
+            errors.append(f"{prefix}: unsupported layout {layout!r}")
+
+    if errors:
+        raise SpecValidationError("\n".join(errors))
+
+
 def merge_tokens(base: dict, override: dict | None) -> dict:
     merged = json.loads(json.dumps(base))
     if not override:
@@ -626,7 +700,8 @@ def add_figure_focus_layout(slide, slide_spec: dict, spec: dict) -> None:
 
     caption = slide_spec.get("image_caption")
     if caption:
-        box = slide.shapes.add_textbox(Inches(0.92), Inches(5.87), Inches(6.72), Inches(0.32))
+        caption_y = 1.42 if slide_spec.get("takeaway") else 5.87
+        box = slide.shapes.add_textbox(Inches(0.92), Inches(caption_y), Inches(6.72), Inches(0.32))
         p = box.text_frame.paragraphs[0]
         run = p.add_run()
         run.text = caption
@@ -676,7 +751,7 @@ def add_figure_focus_layout(slide, slide_spec: dict, spec: dict) -> None:
 
 
 def add_footer(slide, index: int, citation: str | None, *, theme: dict) -> None:
-    num_box = slide.shapes.add_textbox(Inches(12.55), Inches(7.15), Inches(0.28), Inches(0.16))
+    num_box = slide.shapes.add_textbox(Inches(12.42), Inches(7.15), Inches(0.42), Inches(0.16))
     p = num_box.text_frame.paragraphs[0]
     p.alignment = PP_ALIGN.RIGHT
     run = p.add_run()
@@ -927,6 +1002,8 @@ def render_slide_layout(slide, slide_spec: dict, spec: dict) -> None:
 
 
 def build_presentation(spec: dict, output: Path) -> None:
+    validate_slide_spec(spec)
+
     prs = Presentation()
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)

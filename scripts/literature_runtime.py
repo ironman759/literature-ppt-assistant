@@ -45,10 +45,12 @@ def ensure_runtime() -> Path:
     if not PYTHON.exists():
         venv.EnvBuilder(with_pip=True, clear=False).create(VENV_DIR)
 
-    subprocess.run(
+    upgrade = subprocess.run(
         [str(PYTHON), "-m", "pip", "install", "--upgrade", "pip"],
-        check=True,
+        check=False,
     )
+    if upgrade.returncode:
+        print("Warning: pip upgrade failed; continuing with existing pip.", file=sys.stderr)
     subprocess.run(
         [str(PYTHON), "-m", "pip", "install", "-r", str(REQUIREMENTS)],
         check=True,

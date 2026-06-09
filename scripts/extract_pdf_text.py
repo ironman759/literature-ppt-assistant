@@ -45,6 +45,19 @@ def guess_title(lines: list[str]) -> str:
     return max(candidates, key=len) if candidates else (lines[0] if lines else "未识别标题")
 
 
+def clean_metadata_title(title: str | None) -> str:
+    if not title:
+        return ""
+    title = re.sub(r"\s+", " ", title).strip()
+    lowered = title.lower()
+    noisy = ["untitled", "springer", "article", "nature microbiology"]
+    if not title or lowered in noisy:
+        return ""
+    if len(title) < 8:
+        return ""
+    return title
+
+
 def extract_abstract(text: str, max_chars: int = 1800) -> str:
     lower_text = text.lower()
     match = re.search(r"\babstract\b", lower_text)
@@ -69,6 +82,7 @@ def extract_pdf(path: Path, max_chars: int) -> dict[str, object]:
     pages: list[dict[str, object]] = []
     all_text: list[str] = []
     lines: list[str] = []
+    metadata_title = clean_metadata_title(doc.metadata.get("title") if doc.metadata else "")
 
     try:
         for page_index, page in enumerate(doc, start=1):
@@ -92,10 +106,11 @@ def extract_pdf(path: Path, max_chars: int) -> dict[str, object]:
     return {
         "file": str(path),
         "page_count": len(pages),
-        "title_guess": guess_title(lines),
+        "title_guess": metadata_title or guess_title(lines),
         "abstract_snippet": extract_abstract(combined),
         "text_excerpt": excerpt,
         "pages": pages,
+        "extraction_path": "pymupdf",
     }
 
 

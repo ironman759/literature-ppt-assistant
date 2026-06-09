@@ -74,6 +74,131 @@ Each slide should include:
 - `figure_focus`: give one source figure primary visual space.
 - `sampling_design`: sample groups, branches, or experimental design.
 
+## Layout-Specific Fields
+
+Use these fields exactly. The builder validates them before rendering.
+
+### `standard`
+
+Required:
+
+```json
+{
+  "layout": "standard",
+  "bullets": ["Point 1", "Point 2"]
+}
+```
+
+Optional:
+
+```json
+{
+  "image_path": "/absolute/path/to/image.png",
+  "image_caption": "Short caption"
+}
+```
+
+### `comparison`
+
+Required:
+
+```json
+{
+  "layout": "comparison",
+  "left_column": {
+    "title": "Column title",
+    "bullets": ["Point 1", "Point 2"]
+  },
+  "right_column": {
+    "title": "Column title",
+    "bullets": ["Point 1", "Point 2"]
+  }
+}
+```
+
+Do not use `items` for comparison columns. If older specs contain `items`, the builder will convert them to `bullets`, but new specs should use `bullets`.
+
+### `workflow`
+
+Required:
+
+```json
+{
+  "layout": "workflow",
+  "workflow_steps": ["Step 1", "Step 2", "Step 3"]
+}
+```
+
+`bullets` may be used as a fallback, but `workflow_steps` is clearer.
+
+### `result_summary`
+
+Required:
+
+```json
+{
+  "layout": "result_summary",
+  "result_highlights": [
+    {"value": "119,510", "label": "putatively lytic phages"}
+  ],
+  "bullets": ["Interpretive point"]
+}
+```
+
+If `result_highlights` is absent, the builder tries to infer highlights from `bullets`, but explicit highlights are preferred.
+
+### `figure_focus`
+
+Required:
+
+```json
+{
+  "layout": "figure_focus",
+  "image_path": "/absolute/path/to/readable_figure.png",
+  "figure_callout": "What to notice",
+  "bullets": ["Interpretive point"]
+}
+```
+
+Use `image_caption` only for short source notes. If the slide also has a `takeaway`, the builder suppresses bottom captions to avoid overlap; keep full source details in `asset_sources.json`.
+
+### `limitation_implication`
+
+Required:
+
+```json
+{
+  "layout": "limitation_implication",
+  "limitations": ["Risk or uncertainty"],
+  "implications": ["Meaning or opportunity"]
+}
+```
+
+### `section_intro`
+
+Recommended:
+
+```json
+{
+  "layout": "section_intro",
+  "assertion_title": "Section message",
+  "bullets": ["What this section covers"]
+}
+```
+
+### `sampling_design`
+
+Required when used:
+
+```json
+{
+  "layout": "sampling_design",
+  "panel_headings": {"left": "Left panel", "right": "Right panel"},
+  "left_image_path": "/absolute/path/to/left.png",
+  "right_image_path": "/absolute/path/to/right.png"
+}
+```
+
 ## Speaker Notes
 
 Notes are for oral delivery. They should sound like what a prepared presenter would say aloud: clear transitions, moderate density, accurate terms, no copied abstract prose.
@@ -93,3 +218,6 @@ Use phrases such as:
 - Preserve source uncertainty.
 - Do not insert unreadable figures.
 - Use bold/red emphasis sparingly for important numbers, method names, or conclusion terms.
+- Every rendered content slide must have `slide_purpose` and `notes`.
+- Run spec validation before building the deck; empty cards usually mean a layout-specific field name is wrong.
+- After rendering, spot-check QA images for text overflow, unintended whitespace, page-number wrapping, and figure/takeaway overlap.

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -28,11 +29,85 @@ def run(args: list[str], *, allow_fail: bool = False) -> subprocess.CompletedPro
 
 
 def safe_name(text: str) -> str:
-    import re
-
     text = re.sub(r"[/:*?\"<>|]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:120] if text else "未命名文献"
+
+
+def normalize_text(text: str) -> str:
+    text = text.replace("\x00", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def has_cjk(text: str) -> bool:
+    return any("\u3400" <= ch <= "\u9fff" for ch in text)
+
+
+def manifest_title_for(spec_path: Path | None) -> str:
+    if not spec_path or not spec_path.exists():
+        return "来源清单"
+    text = spec_path.read_text(encoding="utf-8", errors="replace")
+    return "来源清单" if has_cjk(text) else "Source and Image Manifest"
+
+
+def guess_title_from_text(text: str, fallback: str) -> str:
+    for raw in text.splitlines()[:40]:
+        line = raw.strip()
+        lowered = line.lower()
+        if not line or lowered in {"abstract", "introduction", "article"}:
+            continue
+        if 8 <= len(line) <= 220:
+            return line
+    return fallback
+
+
+def extract_abstract_from_text(text: str, max_chars: int = 1800) -> str:
+    lower_text = text.lower()
+    match = re.search(r"\babstract\b", lower_text)
+    if not match:
+        return text[:max_chars].strip()
+    snippet = text[match.end() : match.end() + max_chars]
+    markers = ["introduction", "results", "methods", "keywords"]
+    positions = [pos for marker in markers if (pos := snippet.lower().find(marker)) != -1]
+    end = min(positions) if positions else len(snippet)
+    return snippet[:end].strip()
+
+
+def poppler_extract_pdf(pdf: Path, work_dir: Path, max_chars: int) -> dict:
+    if not shutil.which("pdftotext"):
+        raise SystemExit("PyMuPDF extraction failed and `pdftotext` is not available for fallback.")
+    text_path = work_dir / "fulltext_poppler.txt"
+    run(["pdftotext", "-layout", "-enc", "UTF-8", str(pdf), str(text_path)])
+    text = normalize_text(text_path.read_text(encoding="utf-8", errors="replace"))
+
+    page_count = 0
+    metadata_title = ""
+    if shutil.which("pdfinfo"):
+        info = run(["pdfinfo", str(pdf)], allow_fail=True)
+        match = re.search(r"^Pages:\s+(\d+)", info.stdout, re.MULTILINE)
+        if match:
+            page_count = int(match.group(1))
+        title_match = re.search(r"^Title:\s+(.+)", info.stdout, re.MULTILINE)
+        if title_match:
+            metadata_title = title_match.group(1).strip()
+    pages = [
+        {"page_no": index + 1, "char_count": len(page_text), "text": page_text}
+        for index, page_text in enumerate(text.split("\f"))
+    ]
+    if page_count and len(pages) != page_count:
+        pages = [{"page_no": 1, "char_count": len(text), "text": text}]
+
+    return {
+        "file": str(pdf),
+        "page_count": page_count or len(pages),
+        "title_guess": metadata_title or guess_title_from_text(text, pdf.stem),
+        "abstract_snippet": extract_abstract_from_text(text),
+        "text_excerpt": text[:max_chars],
+        "pages": pages,
+        "extraction_path": "poppler_fallback",
+    }
 
 
 def load_title(extract_json: Path, fallback: str | None) -> str:
@@ -79,8 +154,17 @@ def prepare(args: argparse.Namespace) -> dict:
     tokens_json = work_dir / "design_tokens.json"
     manifest_json = args.manifest_json or (work_dir / "asset_sources.json")
 
-    extract = run([sys.executable, str(SCRIPT_DIR / "extract_pdf_text.py"), str(args.pdf), "--max-chars", str(args.max_chars)])
-    extract_json.write_text(extract.stdout, encoding="utf-8")
+    extract = run(
+        [sys.executable, str(SCRIPT_DIR / "extract_pdf_text.py"), str(args.pdf), "--max-chars", str(args.max_chars)],
+        allow_fail=True,
+    )
+    if extract.returncode:
+        extracted = poppler_extract_pdf(args.pdf, work_dir, args.max_chars)
+        extract_json.write_text(json.dumps(extracted, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        data = json.loads(extract.stdout)
+        data.setdefault("extraction_path", "pymupdf")
+        extract_json.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     run([sys.executable, str(SCRIPT_DIR / "analyze_paper_sections.py"), "--input", str(extract_json), "--output", str(sections_json)])
     run([sys.executable, str(SCRIPT_DIR / "generate_design_tokens.py"), "--scenario", args.scenario, "--output", str(tokens_json)])
@@ -123,7 +207,18 @@ def build(args: argparse.Namespace, state: dict) -> dict:
 
     run([sys.executable, str(SCRIPT_DIR / "write_summary_docx.py"), "--input", str(args.summary_md), "--output", str(summary_docx), "--title", title])
     run([sys.executable, str(SCRIPT_DIR / "build_presentation_from_spec.py"), "--spec", str(args.spec), "--output", str(pptx)])
-    run([sys.executable, str(SCRIPT_DIR / "write_sources_docx.py"), "--input", state["manifest_json"], "--output", str(manifest_docx), "--title", "来源清单"])
+    run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "write_sources_docx.py"),
+            "--input",
+            state["manifest_json"],
+            "--output",
+            str(manifest_docx),
+            "--title",
+            manifest_title_for(args.spec),
+        ]
+    )
     run([sys.executable, str(SCRIPT_DIR / "render_pptx_for_qa.py"), "--pptx", str(pptx), "--output-dir", str(qa_dir)], allow_fail=args.allow_qa_fail)
 
     bundle_proc = run(
@@ -160,6 +255,8 @@ def build(args: argparse.Namespace, state: dict) -> dict:
             str(bundle_dir),
             "--qa-dir",
             str(bundle_qa),
+            "--spec",
+            str(args.spec),
             "--output",
             str(validation_json),
         ],

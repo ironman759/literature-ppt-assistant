@@ -82,10 +82,12 @@ If the scenario is not stated, assume `lab_meeting` and say so briefly.
 ## Language Rules
 
 - Chat responses follow the user's language by default.
-- PPT text and speaker notes follow the paper's main language by default.
+- PPT text, speaker notes, and the primary written summary follow the paper's main language by default.
+- For English papers, append a Chinese quick overview after the English summary by default so the user can skim the paper quickly without changing the PPT/report language.
 - If the user wants a Chinese talk from an English paper, use Chinese slide text with original English terms preserved where useful.
 - Speaker notes should be in the same language as the PPT unless the user requests otherwise.
-- The written summary keeps the user's preferred language unless explicitly changed.
+- If the user explicitly requests a different language, follow that request and state the language choice briefly.
+- If a summary contains both English and Chinese, keep the English paper-faithful summary first and place the Chinese quick overview after it as a clearly labeled appendix/section.
 
 ## Analysis Rules
 
@@ -108,6 +110,20 @@ Prioritize this narrative: background -> gap -> objective -> design/method -> re
 Use assertion-style titles where helpful. Every slide in `slide_spec.json` should include `slide_purpose` and `notes`.
 
 For the full slide spec schema and layout fields, read [references/slide_spec_schema.md](references/slide_spec_schema.md).
+
+## Style Defaults
+
+If a reference PPT is provided, profile it and match its rhythm when scientifically appropriate.
+
+If no reference PPT is provided:
+
+- default to an academic journal-club style rather than a decorative business-deck style
+- use clean light backgrounds, restrained accent colours, compact title bars, and fewer large empty cards
+- prioritize figure readability over decorative framing
+- keep takeaway bars thin and non-overlapping
+- avoid large meaningless whitespace; if a slide has sparse content, tighten the layout or add a focused interpretive callout
+
+If the current research workspace already contains a project deck for the same paper/topic, prefer reusing its style and project folder instead of creating an unrelated new visual language.
 
 ## Reference PPT Handling
 
@@ -149,14 +165,18 @@ Treat the task as done only when:
 - speaker notes exist for content slides
 - source or generated images are traceable
 - summary and slides remain faithful to the paper
+- layout-specific fields in `slide_spec.json` validate successfully, with no empty comparison/workflow/result cards caused by schema mismatch
+- QA renders are visually spot-checked for large unintended whitespace, text overflow, page-number wrapping, and figure/takeaway overlap
 
 The runner writes `validation_report.json` when the bundle is built. Inspect it before claiming completion.
 
 ## Fallback / Failure Handling
 
-- If dependencies are missing, run through `scripts/literature_runtime.py`; it creates a managed runtime under `~/.cache/codex-skill-runtimes/literature-ppt-assistant/`.
+- If dependencies are missing, run through `scripts/literature_runtime.py`; it creates a managed runtime under `~/.cache/codex-skill-runtimes/literature-ppt-assistant/`. If pip upgrade/setup fails, use the existing interpreter or poppler fallback rather than stopping immediately.
 - If `extract_pdf_text.py` fails, use the `pdf` skill for OCR/repair or page rendering, then retry.
+- If PyMuPDF is unavailable but `pdftotext`/`pdfinfo` are available, use the poppler fallback extraction path and record that path in `run_state.json`.
 - If figure extraction produces unreadable crops, use page renders or skip the figure rather than inserting noise.
+- For multi-column journal PDFs, prefer readable page-render crops of the main figure over tiny auto-extracted image fragments.
 - If LibreOffice rendering fails but the PPTX is otherwise generated, report that QA rendering failed and include the failure state.
 - If a generated title is bad, rebuild with `--title`.
 
